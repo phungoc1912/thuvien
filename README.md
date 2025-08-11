@@ -16,9 +16,9 @@ Triển khai đơn giản: Đóng gói toàn bộ ứng dụng và các thành p
 
 🚀 Hướng dẫn Cài đặt
 Cài đặt siêu tốc (Khuyên dùng cho Linux)
-Mở terminal và chạy một lệnh duy nhất dưới đây. Script sẽ tự động cài đặt Docker, tải mã nguồn và khởi chạy ứng dụng cho bạn.
+Mở terminal và chạy một lệnh duy nhất dưới đây. Script sẽ tự động kiểm tra và cài đặt các phần mềm cần thiết, tải mã nguồn và khởi chạy ứng dụng cho bạn.
 
-curl -sSL https://raw.githubusercontent.com/phungoc1912/thuvien/main/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/phungoc1912/thuvien/main/install.sh | sed 's/\r$//' | sudo bash
 
 Sau khi script chạy xong, ứng dụng của bạn sẽ sẵn sàng để sử dụng.
 

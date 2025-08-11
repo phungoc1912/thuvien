@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  # Đặt tên cho service của bạn
+  thu_vien_sach:
+    # Xây dựng image từ Dockerfile trong thư mục hiện tại
+    build: .
+    # Đặt tên cho container để dễ quản lý
+    container_name: thu_vien_sach_app
+    # Ánh xạ cổng 5000 của máy bạn tới cổng 5000 bên trong container
+    ports:
+      - "5000:5000"
+    # Gắn (mount) một thư mục trên máy của bạn vào container để lưu trữ dữ liệu
+    volumes:
+      # Dòng này sẽ tạo một thư mục 'kavita_library_data' trên máy của bạn
+      # và liên kết nó với thư mục '/app/kavita_library_data' trong container.
+      # Toàn bộ sách, ảnh bìa, cơ sở dữ liệu và file cấu hình sẽ được lưu ở đây,
+      # đảm bảo dữ liệu không bị mất khi bạn tắt container.
+      - ./kavita_library_data:/app/kavita_library_data
+    # Tự động khởi động lại container trừ khi bạn chủ động dừng nó
+    restart: unless-stopped

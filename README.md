@@ -35,7 +35,7 @@ cd thuvien
 
 3. Khởi chạy ứng dụng!
 
-docker-compose up -d
+docker compose up -d
 
 💻 Sử dụng
 Truy cập ứng dụng: Mở trình duyệt và truy cập vào địa chỉ: http://localhost:5000
@@ -54,4 +54,4 @@ Toàn bộ dữ liệu của bạn (sách, ảnh bìa, cơ sở dữ liệu, fil
 🛑 Dừng ứng dụng
 Để dừng ứng dụng, mở terminal trong thư mục thuvien và chạy lệnh:
 
-docker-compose down
+docker compose down

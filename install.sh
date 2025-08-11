@@ -51,17 +51,17 @@ install_dependencies() {
 
 # Kiểm tra và cài đặt Docker
 install_docker() {
-    if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
+    # Kiểm tra xem plugin compose có hoạt động không
+    if docker compose version &> /dev/null; then
         log_info "Docker và Docker Compose đã được cài đặt."
     else
-        log_info "Docker chưa được cài đặt. Bắt đầu quá trình cài đặt..."
+        log_info "Docker hoặc Docker Compose chưa được cài đặt đúng. Bắt đầu quá trình cài đặt..."
         # Sử dụng script chính thức từ Docker để cài đặt
         curl -fsSL https://get.docker.com -o get-docker.sh
         sh get-docker.sh
         rm get-docker.sh
         
         # Thêm người dùng hiện tại vào nhóm docker để không cần sudo khi chạy lệnh docker
-        # Lấy tên người dùng đã gọi sudo
         SUDO_USER=$(logname)
         if [ -n "$SUDO_USER" ]; then
             usermod -aG docker "$SUDO_USER"
@@ -69,7 +69,7 @@ install_docker() {
             log_warn "Bạn có thể cần đăng xuất và đăng nhập lại để thay đổi có hiệu lực."
         fi
         
-        log_info "Cài đặt Docker Compose..."
+        log_info "Đảm bảo Docker Compose plugin đã được cài đặt..."
         apt-get install -y docker-compose-plugin || apt-get install -y docker-compose
     fi
 }
@@ -94,13 +94,13 @@ build_and_run() {
     log_info "Đang ở trong thư mục: $(pwd)"
     log_info "Bắt đầu xây dựng và khởi chạy container..."
     
-    # Kiểm tra xem docker-compose.yml có tồn tại không
     if [ ! -f "docker-compose.yml" ]; then
         echo "Lỗi: Không tìm thấy file docker-compose.yml."
         exit 1
     fi
 
-    docker-compose up -d --build
+    # SỬA LỖI: Dùng 'docker compose' thay vì 'docker-compose'
+    docker compose up -d --build
     if [ $? -ne 0 ]; then
         echo "Lỗi: Docker Compose thất bại."
         exit 1
@@ -121,7 +121,7 @@ main() {
     log_info "Truy cập vào: http://localhost:5000"
     log_info "Tài khoản mặc định: admin / password"
     log_info "Dữ liệu của bạn được lưu tại thư mục '$REPO_DIR/kavita_library_data'"
-    log_info "Để dừng ứng dụng, chạy lệnh: cd $REPO_DIR && docker-compose down"
+    log_info "Để dừng ứng dụng, chạy lệnh: cd $REPO_DIR && docker compose down"
     log_info "============================================================"
 }
 

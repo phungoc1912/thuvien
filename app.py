@@ -2618,6 +2618,9 @@ def import_calibre():
 @app.route('/process_calibre_import', methods=['POST'])
 @login_required
 def process_calibre_import():
+    success_count = 0   # <-- Khởi tạo ngay từ đầu
+    warning_count = 0
+    error_count = 0
     if session.get('username') == GUEST_USERNAME:
         permissions = GuestPermission.query.first()
         if not permissions or not permissions.can_upload_books:

@@ -66,7 +66,7 @@ ALLOWED_EXTENSIONS = {'epub', 'mobi', 'pdf', 'azw3', 'txt', 'azw', 'doc', 'docx'
 ADMIN_USERNAME = 'admin'
 ADMIN_PASSWORD = 'password'
 GUEST_USERNAME = 'guest'
-BOOKS_PER_PAGE = 18
+BOOKS_PER_PAGE = 21 # Tang so luong sach moi trang
 COVER_MAX_HEIGHT = 600
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'))
@@ -100,6 +100,7 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(120), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=False, nullable=False) # Tai khoan co duoc phep hoat dong khong
 
 book_list_association = db.Table('book_list_association',
     db.Column('book_id', db.Integer, db.ForeignKey('book.id'), primary_key=True),
@@ -120,6 +121,7 @@ class Book(db.Model):
     publisher = db.Column(db.String(200))
     pubdate = db.Column(db.String(100))
     language = db.Column(db.String(50))
+    date_added = db.Column(db.DateTime, default=datetime.utcnow) # Them truong ngay them
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     user = db.relationship('User', backref=db.backref('books', lazy=True, cascade="all, delete-orphan"))
     has_cover = db.Column(db.Boolean, default=False, nullable=False)
@@ -158,7 +160,7 @@ class GuestPermission(db.Model):
     can_delete_books = db.Column(db.Boolean, default=False, nullable=False)
     can_convert_books = db.Column(db.Boolean, default=False, nullable=False)
     can_bookmark = db.Column(db.Boolean, default=False, nullable=False)
-    can_favorite = db.Column(db.Boolean, default=False, nullable=False) # Them quyen yeu thich
+    can_favorite = db.Column(db.Boolean, default=False, nullable=False)
 
 def get_cover_path(book):
     """Tao duong dan file anh bia tinh cho mot cuon sach."""
@@ -227,7 +229,6 @@ def initialize_database():
     default_cover_path = os.path.join(app.static_folder, 'default_cover.jpg')
     if not os.path.exists(default_cover_path):
         try:
-            # Using a neutral placeholder
             r = requests.get("https://placehold.co/400x600/e2e8f0/4a5568?text=No+Cover", stream=True)
             if r.status_code == 200:
                 with open(default_cover_path, 'wb') as f:
@@ -238,9 +239,9 @@ def initialize_database():
     with app.app_context():
         db.create_all()
         if not User.query.filter_by(username=ADMIN_USERNAME).first():
-            db.session.add(User(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, is_admin=True))
+            db.session.add(User(username=ADMIN_USERNAME, password=ADMIN_PASSWORD, is_admin=True, is_active=True))
         if not User.query.filter_by(username=GUEST_USERNAME).first():
-            db.session.add(User(username=GUEST_USERNAME, password="", is_admin=False))
+            db.session.add(User(username=GUEST_USERNAME, password="", is_admin=False, is_active=True))
         if not GuestPermission.query.first():
             db.session.add(GuestPermission())
         db.session.commit()
@@ -283,7 +284,6 @@ def inject_global_vars():
         library_users=library_users,
         GUEST_USERNAME=GUEST_USERNAME,
         ADMIN_USERNAME=ADMIN_USERNAME,
-        # Pass config to templates for JS fallback
         app_config=load_config() 
     )
 
@@ -298,7 +298,6 @@ LAYOUT_TEMPLATE = """
     <title>{{ app_config.library_name }}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="//unpkg.com/alpinejs" defer></script>
     <script>
         // Set theme based on localStorage or system preference
         (function() {
@@ -389,33 +388,66 @@ LAYOUT_TEMPLATE = """
         html.dark ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
         html:not(.dark) ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
 
-        .book-cover {
-            height: 240px; width: 100%; object-fit: cover; object-position: top;
-            transition: transform 0.3s ease;
-            background-color: #e2e8f0; /* Light mode placeholder */
+        .hidden { display: none !important; }
+        
+        /* Dropdown fix for no-JS browsers */
+        details.relative > .absolute {
+            display: none;
         }
-        .dark .book-cover { background-color: #374151; } /* Dark mode placeholder */
-        @media (min-width: 640px) { .book-cover { height: 300px; } }
-        .book-card:hover .book-cover { transform: scale(1.05); }
-        .interactive-star:hover { color: #f59e0b; }
-        [x-cloak] { display: none !important; }
+        details[open].relative > .absolute {
+            display: block;
+        }
+        
+        /* Kindle compatibility for dropdowns */
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+        
+        /* Kindle UI Fixes */
+        .cover-container {
+            position: relative;
+            width: 100%;
+            padding-top: 150%; /* Aspect Ratio 2:3 */
+            background-color: #e2e8f0;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        .dark .cover-container { background-color: #374151; }
+        .cover-container img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }
+        .book-card:hover .cover-container img {
+            transform: scale(1.05);
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-weight: bold;
+            line-height: 1.2;
+        }
+        h1 { font-size: 1.75em; }
+        h2 { font-size: 1.25em; }
+        h3 { font-size: 1.1em; }
+        body { font-size: 16px; } /* Set a base font size for better scaling */
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans transition-colors duration-300">
-    <div x-data="{ sidebarOpen: false }" class="flex min-h-screen">
+    <div id="app-container" class="flex min-h-screen">
         <!-- Overlay for mobile -->
-        <div x-show="sidebarOpen" @click="sidebarOpen = false" class="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden" x-cloak></div>
+        <div id="sidebar-overlay" onclick="toggleSidebar(false)" class="fixed inset-0 bg-black bg-opacity-50 z-20 md:hidden hidden"></div>
 
         <!-- Sidebar -->
-        <aside 
-            class="w-64 bg-white dark:bg-gray-800 p-4 flex flex-col fixed h-full z-30 transform transition-transform duration-300 ease-in-out md:translate-x-0"
-            :class="{'translate-x-0': sidebarOpen, '-translate-x-full': !sidebarOpen}">
+        <aside id="main-sidebar" 
+            class="w-64 bg-white dark:bg-gray-800 p-4 flex flex-col fixed h-full z-30 transform -translate-x-full transition-transform duration-300 ease-in-out md:translate-x-0">
             
             <div class="flex items-center justify-between">
-                <h1 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
+                <h1 class="text-xl font-bold text-gray-900 dark:text-white flex items-center">
                     <i class="fas fa-book-open text-theme-500 mr-2"></i> {{ app_config.library_name }}
                 </h1>
-                <button @click="sidebarOpen = false" class="md:hidden text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
+                <button onclick="toggleSidebar(false)" class="md:hidden text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">
                     <i class="fas fa-times text-2xl"></i>
                 </button>
             </div>
@@ -426,21 +458,23 @@ LAYOUT_TEMPLATE = """
                     <li class="mb-4"><a href="{{ url_for('favorites') }}" class="flex items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><i class="fas fa-heart w-6 mr-2 text-red-500"></i> Sách Yêu Thích</a></li>
                     <li class="mb-4"><a href="{{ url_for('bookmarks') }}" class="flex items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><i class="fas fa-bookmark w-6 mr-2 text-theme-500"></i> Sách đã đánh dấu</a></li>
                     
-                    <li class="mb-2" x-data="{ open: false }">
-                        <button @click="open = !open" class="w-full flex justify-between items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                            <span class="flex items-center"><i class="fas fa-list-check w-6 mr-2"></i> Kệ sách</span>
-                            <i class="fas transition-transform" :class="{'fa-chevron-down': open, 'fa-chevron-right': !open}"></i>
-                        </button>
-                        <ul x-show="open" class="pl-6 mt-1 space-y-1" x-transition>
-                            {% for list in user_book_lists %}
-                            <li><a href="{{ url_for('view_list', list_id=list.id) }}" class="block p-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/50 dark:hover:bg-gray-700/50 rounded-md">{{ list.name }}</a></li>
-                            {% endfor %}
-                            <li>
-                                <button onclick="document.getElementById('create-list-modal').classList.remove('hidden')" class="w-full text-left p-1.5 text-sm text-theme-600 dark:text-theme-500 hover:text-theme-700 dark:hover:text-theme-400 font-semibold">
-                                    <i class="fas fa-plus-circle mr-1"></i> Tạo kệ sách mới
-                                </button>
-                            </li>
-                        </ul>
+                    <li class="mb-2">
+                        <details class="group">
+                            <summary class="w-full flex justify-between items-center p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg cursor-pointer">
+                                <span class="flex items-center"><i class="fas fa-list-check w-6 mr-2"></i> Kệ sách</span>
+                                <i class="fas fa-chevron-right transition-transform group-open:rotate-90"></i>
+                            </summary>
+                            <ul class="pl-6 mt-1 space-y-1">
+                                {% for list in user_book_lists %}
+                                <li><a href="{{ url_for('view_list', list_id=list.id) }}" class="block p-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200/50 dark:hover:bg-gray-700/50 rounded-md">{{ list.name }}</a></li>
+                                {% endfor %}
+                                <li>
+                                    <button onclick="toggleModal('create-list-modal', true)" class="w-full text-left p-1.5 text-sm text-theme-600 dark:text-theme-500 hover:text-theme-700 dark:hover:text-theme-400 font-semibold">
+                                        <i class="fas fa-plus-circle mr-1"></i> Tạo kệ sách mới
+                                    </button>
+                                </li>
+                            </ul>
+                        </details>
                     </li>
 
                     <li class="mb-2"><hr class="border-gray-200 dark:border-gray-600"></li>
@@ -499,7 +533,7 @@ LAYOUT_TEMPLATE = """
             <!-- Top Bar -->
             <header class="bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm p-3 flex items-center justify-between sticky top-0 z-10 border-b border-gray-200 dark:border-gray-700">
                 <!-- Hamburger Menu Button -->
-                <button @click="sidebarOpen = true" class="md:hidden text-gray-800 dark:text-white text-2xl">
+                <button onclick="toggleSidebar(true)" class="md:hidden text-gray-800 dark:text-white text-2xl">
                     <i class="fas fa-bars"></i>
                 </button>
 
@@ -511,18 +545,18 @@ LAYOUT_TEMPLATE = """
                 </form>
                 <div class="flex items-center">
                     {% if session.get('logged_in') %}
-                        <div class="relative" x-data="{ open: false }">
-                            <button @click="open = !open" class="flex items-center text-gray-800 dark:text-white ml-4">
+                        <details class="relative">
+                            <summary class="list-none flex items-center text-gray-800 dark:text-white ml-4 cursor-pointer">
                                 <span class="hidden sm:inline">Xin chào, </span><strong class="mx-1">{{ session.get('username') }}</strong>
                                 <i class="fas fa-caret-down ml-1"></i>
-                            </button>
-                            <div x-show="open" @click.away="open = false" class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl z-20" x-cloak>
+                            </summary>
+                            <div class="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl z-20">
                                 {% if session.get('username') != GUEST_USERNAME %}
                                 <a href="{{ url_for('change_password') }}" class="block px-4 py-2 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600">Đổi mật khẩu</a>
                                 {% endif %}
                                 <a href="{{ url_for('logout') }}" class="block px-4 py-2 text-gray-800 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600">Đăng xuất</a>
                             </div>
-                        </div>
+                        </details>
                     {% else %}
                         <a href="{{ url_for('login') }}" class="ml-4 px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700 transition-colors">Đăng nhập</a>
                     {% endif %}
@@ -556,7 +590,7 @@ LAYOUT_TEMPLATE = """
         <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-sm w-full">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold text-gray-900 dark:text-white">Tạo kệ sách mới</h3>
-                <button onclick="document.getElementById('create-list-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-800 dark:hover:text-white text-2xl">&times;</button>
+                <button onclick="toggleModal('create-list-modal', false)" class="text-gray-400 hover:text-gray-800 dark:hover:text-white text-2xl">&times;</button>
             </div>
             <form id="create-list-form">
                 <div class="mb-4">
@@ -574,6 +608,27 @@ LAYOUT_TEMPLATE = """
         const color = localStorage.getItem('kavita_theme_color') || '{{ app_config.theme_color }}';
         document.body.classList.add(`theme-${color}`);
     })();
+
+    function toggleSidebar(show) {
+        const sidebar = document.getElementById('main-sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        if (show) {
+            sidebar.classList.remove('-translate-x-full');
+            overlay.classList.remove('hidden');
+        } else {
+            sidebar.classList.add('-translate-x-full');
+            overlay.classList.add('hidden');
+        }
+    }
+    
+    function toggleModal(modalId, show) {
+        const modal = document.getElementById(modalId);
+        if (show) {
+            modal.classList.remove('hidden');
+        } else {
+            modal.classList.add('hidden');
+        }
+    }
 
     if (document.getElementById('create-list-form')) {
         document.getElementById('create-list-form').addEventListener('submit', function(e) {
@@ -606,32 +661,23 @@ LAYOUT_TEMPLATE = """
 INDEX_TEMPLATE = """
 {% if random_books %}
 <div class="mb-12">
-    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Khám phá ngẫu nhiên</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 md:gap-6">
+    <h2 class="text-xl text-gray-900 dark:text-white mb-6">Khám phá ngẫu nhiên</h2>
+    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-4 md:gap-6">
         {% for book in random_books %}
-            <div class="book-card relative bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl dark:hover:shadow-theme-800/20 transition-shadow duration-300 group">
+            <div class="book-card group">
                 <a href="{{ url_for('book_detail', book_id=book.id) }}">
-                    <img src="{{ url_for('cover', book_id=book.id) }}" 
-                         loading="lazy" 
-                         class="book-cover" 
-                         alt="Bìa sách {{ book.title }}"
-                         onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                    <div class="cover-container">
+                        <img src="{{ url_for('cover', book_id=book.id) }}" 
+                             loading="lazy" 
+                             alt="Bìa sách {{ book.title }}"
+                             onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                    </div>
                 </a>
-                {% if book.is_favorited %}
-                <div class="absolute top-2 left-2 text-red-500 text-xl pointer-events-none drop-shadow-lg">
-                    <i class="fas fa-heart"></i>
-                </div>
-                {% endif %}
-                {% if book.is_bookmarked %}
-                <div class="absolute top-2 right-2 text-theme-500 text-xl pointer-events-none drop-shadow-lg">
-                    <i class="fas fa-bookmark"></i>
-                </div>
-                {% endif %}
-                <div class="p-3">
+                <div class="relative pt-2">
                     <a href="{{ url_for('book_detail', book_id=book.id) }}">
-                        <h3 class="font-bold text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ book.title }}</h3>
+                        <h3 class="font-bold text-sm text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ book.title }}</h3>
                     </a>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ book.author }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ book.author }}</p>
                 </div>
             </div>
         {% endfor %}
@@ -640,32 +686,47 @@ INDEX_TEMPLATE = """
 <hr class="border-gray-200 dark:border-gray-700 my-8">
 {% endif %}
 
-<h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">{{ page_title or 'Thư viện' }}</h2>
-<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+<div class="flex flex-col sm:flex-row justify-between items-center mb-6">
+    <h2 class="text-xl text-gray-900 dark:text-white">{{ page_title or 'Thư viện' }}</h2>
+    <form method="GET" action="{{ url_for(request.endpoint, **request.view_args) }}" class="mt-4 sm:mt-0">
+        <input type="hidden" name="q" value="{{ query or '' }}">
+        <select name="sort" onchange="this.form.submit()" class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-theme-500">
+            <option value="title_asc" {% if sort == 'title_asc' %}selected{% endif %}>Sắp xếp: Tựa đề (A-Z)</option>
+            <option value="title_desc" {% if sort == 'title_desc' %}selected{% endif %}>Sắp xếp: Tựa đề (Z-A)</option>
+            <option value="author_asc" {% if sort == 'author_asc' %}selected{% endif %}>Sắp xếp: Tác giả (A-Z)</option>
+            <option value="author_desc" {% if sort == 'author_desc' %}selected{% endif %}>Sắp xếp: Tác giả (Z-A)</option>
+            <option value="rating_desc" {% if sort == 'rating_desc' %}selected{% endif %}>Sắp xếp: Đánh giá (Cao nhất)</option>
+            <option value="date_desc" {% if sort == 'date_desc' %}selected{% endif %}>Sắp xếp: Mới thêm gần đây</option>
+        </select>
+    </form>
+</div>
+
+<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4 md:gap-6">
     {% for book in pagination.items %}
-        <div class="book-card relative bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl dark:hover:shadow-theme-800/20 transition-shadow duration-300 group">
+        <div class="book-card group bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-md hover:shadow-lg dark:hover:shadow-theme-800/20 transition-shadow duration-300">
             <a href="{{ url_for('book_detail', book_id=book.id) }}">
-                <img src="{{ url_for('cover', book_id=book.id) }}"
-                     loading="lazy"
-                     class="book-cover" 
-                     alt="Bìa sách {{ book.title }}"
-                     onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                 <div class="cover-container">
+                    <img src="{{ url_for('cover', book_id=book.id) }}"
+                         loading="lazy"
+                         alt="Bìa sách {{ book.title }}"
+                         onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                </div>
             </a>
-            {% if book.is_favorited %}
-            <div class="absolute top-2 left-2 text-red-500 text-xl pointer-events-none drop-shadow-lg">
-                <i class="fas fa-heart"></i>
-            </div>
-            {% endif %}
-            {% if book.is_bookmarked %}
-            <div class="absolute top-2 right-2 text-theme-500 text-xl pointer-events-none drop-shadow-lg">
-                <i class="fas fa-bookmark"></i>
-            </div>
-            {% endif %}
-            <div class="p-3">
+            <div class="relative p-2">
+                {% if book.is_favorited %}
+                <div class="absolute top-[-0.5rem] left-1 text-red-500 text-lg pointer-events-none drop-shadow">
+                    <i class="fas fa-heart"></i>
+                </div>
+                {% endif %}
+                {% if book.is_bookmarked %}
+                <div class="absolute top-[-0.5rem] right-1 text-theme-500 text-lg pointer-events-none drop-shadow">
+                    <i class="fas fa-bookmark"></i>
+                </div>
+                {% endif %}
                 <a href="{{ url_for('book_detail', book_id=book.id) }}">
-                    <h3 class="font-bold text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ book.title }}</h3>
+                    <h3 class="font-bold text-sm text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ book.title }}</h3>
                 </a>
-                <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ book.author }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ book.author }}</p>
                 {% if is_admin %}
                 <p class="text-xs text-gray-400 dark:text-gray-500 truncate mt-1"><i class="fas fa-user mr-1"></i>{{ book.owner_username }}</p>
                 {% endif %}
@@ -681,17 +742,17 @@ INDEX_TEMPLATE = """
 <!-- Phan trang -->
 <div class="flex justify-center mt-10">
     <nav class="flex items-center space-x-1 sm:space-x-2">
-        <a href="{{ url_for(request.endpoint, page=pagination.prev_num, q=query, user_id=request.view_args.get('user_id'), list_id=request.view_args.get('list_id')) if pagination.has_prev else '#' }}" class="px-3 py-2 sm:px-4 bg-white dark:bg-gray-700 rounded-lg {% if not pagination.has_prev %}opacity-50 cursor-not-allowed{% else %}hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">
+        <a href="{{ url_for(request.endpoint, page=pagination.prev_num, q=query, sort=sort, **request.view_args) if pagination.has_prev else '#' }}" class="px-3 py-2 sm:px-4 bg-white dark:bg-gray-700 rounded-lg {% if not pagination.has_prev %}opacity-50 cursor-not-allowed{% else %}hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">
             <i class="fas fa-arrow-left"></i>
         </a>
         {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=1, right_current=1) %}
             {% if p %}
-                <a href="{{ url_for(request.endpoint, page=p, q=query, user_id=request.view_args.get('user_id'), list_id=request.view_args.get('list_id')) }}" class="px-3 py-2 sm:px-4 rounded-lg {% if p == pagination.page %}bg-theme-600 text-white{% else %}bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">{{ p }}</a>
+                <a href="{{ url_for(request.endpoint, page=p, q=query, sort=sort, **request.view_args) }}" class="px-3 py-2 sm:px-4 rounded-lg {% if p == pagination.page %}bg-theme-600 text-white{% else %}bg-white dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">{{ p }}</a>
             {% else %}
                 <span class="px-3 py-2 sm:px-4 text-gray-500 hidden sm:inline">...</span>
             {% endif %}
         {% endfor %}
-        <a href="{{ url_for(request.endpoint, page=pagination.next_num, q=query, user_id=request.view_args.get('user_id'), list_id=request.view_args.get('list_id')) if pagination.has_next else '#' }}" class="px-3 py-2 sm:px-4 bg-white dark:bg-gray-700 rounded-lg {% if not pagination.has_next %}opacity-50 cursor-not-allowed{% else %}hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">
+        <a href="{{ url_for(request.endpoint, page=pagination.next_num, q=query, sort=sort, **request.view_args) if pagination.has_next else '#' }}" class="px-3 py-2 sm:px-4 bg-white dark:bg-gray-700 rounded-lg {% if not pagination.has_next %}opacity-50 cursor-not-allowed{% else %}hover:bg-gray-200 dark:hover:bg-gray-600{% endif %}">
             <i class="fas fa-arrow-right"></i>
         </a>
     </nav>
@@ -702,23 +763,26 @@ BOOK_DETAIL_TEMPLATE = """
 <div class="flex flex-col md:flex-row gap-8">
     <div class="w-full md:w-1/3 lg:w-1/4 mx-auto md:mx-0 max-w-xs">
         <a href="{{ url_for('cover_original', book_id=book.id) }}" target="_blank">
-            <img src="{{ url_for('cover', book_id=book.id) }}" 
-                 alt="Bìa sách {{ book.title }}" 
-                 class="rounded-lg shadow-2xl w-full"
-                 onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+            <div class="cover-container shadow-2xl">
+                <img src="{{ url_for('cover', book_id=book.id) }}" 
+                     alt="Bìa sách {{ book.title }}"
+                     onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+            </div>
         </a>
     </div>
 
     <div class="w-full md:w-2/3 lg:w-3/4">
-        <h2 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">{{ book.title }}</h2>
-        <a href="{{ url_for('index', q=book.author) }}" class="text-lg md:text-xl text-gray-500 dark:text-gray-400 hover:text-theme-600 dark:hover:text-theme-400">{{ book.author }}</a>
+        <h1 class="text-2xl md:text-3xl text-gray-900 dark:text-white">{{ book.title }}</h1>
+        <h2 class="text-lg md:text-xl text-gray-500 dark:text-gray-400 hover:text-theme-600 dark:hover:text-theme-400"><a href="{{ url_for('index', q=book.author) }}">{{ book.author }}</a></h2>
         
-        <div id="rating-stars" class="flex items-center my-3 text-2xl {% if session.get('username') == GUEST_USERNAME and not guest_permissions.can_rate %}pointer-events-none opacity-50{% endif %}">
-            {% for i in range(1, 6) %}
-                <i class="fas fa-star cursor-pointer interactive-star {% if book.rating and book.rating >= i %}text-yellow-400{% else %}text-gray-400 dark:text-gray-600{% endif %}" 
-                   data-rating="{{ i }}"
-                   onclick="rateBook({{ book.id }}, {{ i }})"></i>
-            {% endfor %}
+        <div class="my-3">
+            <form action="{{ url_for('rate_book', book_id=book.id) }}" method="POST" class="flex items-center {% if session.get('username') == GUEST_USERNAME and not guest_permissions.can_rate %}pointer-events-none opacity-50{% endif %}">
+                {% for i in range(1, 6) %}
+                    <button type="submit" name="rating" value="{{ i }}" class="bg-transparent border-none text-2xl cursor-pointer p-0 mx-1 focus:outline-none">
+                        <i class="fas fa-star {% if book.rating and book.rating >= i %}text-yellow-400{% else %}text-gray-400 dark:text-gray-600{% endif %}"></i>
+                    </button>
+                {% endfor %}
+            </form>
         </div>
         
         <div class="my-6 flex flex-wrap gap-2">
@@ -728,21 +792,18 @@ BOOK_DETAIL_TEMPLATE = """
                     <i class="fas fa-book-open mr-2"></i> Đọc sách
                 </a>
             {% else %}
-                <button class="px-3 py-2 bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 rounded-lg cursor-not-allowed flex items-center" disabled title="Không có định dạng EPUB để đọc online">
+                <span class="px-3 py-2 bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 rounded-lg cursor-not-allowed flex items-center" title="Không có định dạng EPUB để đọc online">
                     <i class="fas fa-book-open mr-2"></i> Đọc sách
-                </button>
+                </span>
             {% endif %}
 
             <!-- Nút tải về (Dropdown) -->
-            <div x-data="{ open: false }" class="relative">
-                <button @click="open = !open" class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center">
+            <details class="relative">
+                <summary class="list-none px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center cursor-pointer">
                     <i class="fas fa-download mr-2"></i> Tải về
-                    <i class="fas fa-chevron-down ml-2 text-xs transition-transform" :class="{'rotate-180': open}"></i>
-                </button>
-                <div x-show="open" @click.away="open = false" 
-                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="transform opacity-0 scale-95" x-transition:enter-end="transform opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="transform opacity-100 scale-100" x-transition:leave-end="transform opacity-0 scale-95"
-                     class="absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 focus:outline-none z-10" x-cloak>
+                    <i class="fas fa-chevron-down ml-2 text-xs"></i>
+                </summary>
+                <div class="absolute left-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
                     <div class="py-1" role="none">
                         {% for b in all_formats %}
                         <div class="flex items-center justify-between px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600">
@@ -757,36 +818,40 @@ BOOK_DETAIL_TEMPLATE = """
                         {% endfor %}
                     </div>
                 </div>
-            </div>
+            </details>
 
-            <button onclick="openListManagerModal({{ book.id }})" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
+            <a href="{{ url_for('list_manager_page', book_id=book.id) }}" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
                 <i class="fas fa-plus mr-2"></i> Thêm vào kệ
-            </button>
+            </a>
 
             {% if session.get('username') != GUEST_USERNAME or (guest_permissions and guest_permissions.can_favorite) %}
-            <button onclick="toggleFavorite({{ book.id }})" id="favorite-btn" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
-                <i id="favorite-icon" class="{% if is_favorited %}fas fa-heart text-red-500{% else %}far fa-heart{% endif %} mr-2"></i> 
-                <span id="favorite-text">{% if is_favorited %}Bỏ thích{% else %}Yêu thích{% endif %}</span>
-            </button>
+            <form action="{{ url_for('toggle_favorite', book_id=book.id) }}" method="POST" class="inline-block">
+                <button type="submit" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
+                    <i class="{% if is_favorited %}fas fa-heart text-red-500{% else %}far fa-heart{% endif %} mr-2"></i> 
+                    <span>{% if is_favorited %}Bỏ thích{% else %}Yêu thích{% endif %}</span>
+                </button>
+            </form>
             {% endif %}
 
             {% if session.get('username') != GUEST_USERNAME or (guest_permissions and guest_permissions.can_bookmark) %}
-            <button onclick="toggleBookmark({{ book.id }})" id="bookmark-btn" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
-                <i id="bookmark-icon" class="{% if is_bookmarked %}fas fa-bookmark text-theme-500{% else %}far fa-bookmark{% endif %} mr-2"></i> 
-                <span id="bookmark-text">{% if is_bookmarked %}Bỏ đánh dấu{% else %}Đánh dấu{% endif %}</span>
-            </button>
+            <form action="{{ url_for('toggle_bookmark', book_id=book.id) }}" method="POST" class="inline-block">
+                <button type="submit" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors flex items-center">
+                    <i class="{% if is_bookmarked %}fas fa-bookmark text-theme-500{% else %}far fa-bookmark{% endif %} mr-2"></i> 
+                    <span>{% if is_bookmarked %}Bỏ đánh dấu{% else %}Đánh dấu{% endif %}</span>
+                </button>
+            </form>
             {% endif %}
 
             {% if session.get('is_admin') or (book.user_id == session.get('user_id')) %}
-                <button onclick="document.getElementById('convert-modal').classList.remove('hidden')" class="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center">
+                <a href="{{ url_for('convert_page', book_id=book.id) }}" class="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center">
                     <i class="fas fa-sync-alt mr-2"></i> Chuyển đổi
-                </button>
+                </a>
                 <a href="{{ url_for('edit', book_id=book.id) }}" class="px-3 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors flex items-center"><i class="fas fa-edit mr-2"></i> Sửa</a>
                 <a href="{{ url_for('delete', book_id=book.id) }}" onclick="return confirm('Bạn có chắc chắn muốn xóa sách này và TẤT CẢ các định dạng của nó?')" class="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center"><i class="fas fa-trash mr-2"></i> Xóa</a>
             {% endif %}
         </div>
 
-        <h3 class="text-xl font-semibold text-gray-900 dark:text-white mt-8 mb-2">Mô tả</h3>
+        <h3 class="text-xl text-gray-900 dark:text-white mt-8 mb-2">Mô tả</h3>
         <p class="text-gray-700 dark:text-gray-300 leading-relaxed">{{ book.description or 'Chưa có mô tả cho sách này.' }}</p>
         
         <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -801,7 +866,7 @@ BOOK_DETAIL_TEMPLATE = """
             {% endif %}
         </div>
 
-        <h3 class="text-xl font-semibold text-gray-900 dark:text-white mt-8 mb-2">Thể loại</h3>
+        <h3 class="text-xl text-gray-900 dark:text-white mt-8 mb-2">Thể loại</h3>
         <div class="flex flex-wrap gap-2">
             {% for tag in (book.tags or '').split(',') %}
                 {% if tag.strip() %}
@@ -813,22 +878,23 @@ BOOK_DETAIL_TEMPLATE = """
 </div>
 
 <div class="mt-12">
-    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Sách liên quan</h2>
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6">
+    <h2 class="text-xl text-gray-900 dark:text-white mb-6">Sách liên quan</h2>
+    <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4 md:gap-6">
         {% for related_book in related_books %}
-            <div class="book-card bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-lg hover:shadow-xl dark:hover:shadow-theme-800/20 transition-shadow duration-300 group">
+            <div class="book-card group bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow-md hover:shadow-lg dark:hover:shadow-theme-800/20 transition-shadow duration-300">
                 <a href="{{ url_for('book_detail', book_id=related_book.id) }}">
-                    <img src="{{ url_for('cover', book_id=related_book.id) }}" 
-                         loading="lazy"
-                         class="book-cover" 
-                         alt="Bìa sách {{ related_book.title }}"
-                         onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                    <div class="cover-container">
+                        <img src="{{ url_for('cover', book_id=related_book.id) }}" 
+                             loading="lazy"
+                             alt="Bìa sách {{ related_book.title }}"
+                             onerror="this.onerror=null; this.src='{{ url_for('static', filename='default_cover.jpg') }}';">
+                    </div>
                 </a>
-                <div class="p-3">
+                <div class="p-2">
                     <a href="{{ url_for('book_detail', book_id=related_book.id) }}">
-                        <h3 class="font-bold text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ related_book.title }}</h3>
+                        <h3 class="font-bold text-sm text-gray-800 dark:text-white truncate group-hover:text-theme-600 dark:group-hover:text-theme-400">{{ related_book.title }}</h3>
                     </a>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ related_book.author }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ related_book.author }}</p>
                 </div>
             </div>
         {% else %}
@@ -836,195 +902,6 @@ BOOK_DETAIL_TEMPLATE = """
         {% endfor %}
     </div>
 </div>
-
-<!-- Modals -->
-<div id="convert-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
-    <div class="bg-white dark:bg-gray-800 rounded-lg p-8 max-w-sm w-full">
-        <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Chuyển đổi sách</h3>
-        <p class="text-gray-500 dark:text-gray-400 mb-6">Chọn định dạng bạn muốn chuyển đổi sang:</p>
-        <form action="{{ url_for('convert_book', book_id=book.id) }}" method="POST">
-            <select name="target_format" class="w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg p-3 mb-6 focus:outline-none focus:ring-2 focus:ring-theme-500">
-                {% for fmt in ['epub', 'mobi', 'pdf', 'azw3'] %}
-                    {% if fmt != book.format %}
-                        <option value="{{ fmt }}">{{ fmt.upper() }}</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-            <div class="flex justify-end space-x-4">
-                <button type="button" onclick="document.getElementById('convert-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Hủy</button>
-                <button type="submit" class="px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Chuyển đổi</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div id="list-manager-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden z-50 p-4">
-    <div class="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-bold text-gray-900 dark:text-white">Thêm/Xóa khỏi kệ sách</h3>
-            <button onclick="document.getElementById('list-manager-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-800 dark:hover:text-white text-2xl">&times;</button>
-        </div>
-        <div id="list-manager-content" class="space-y-2 max-h-60 overflow-y-auto mb-4"></div>
-        <hr class="border-gray-200 dark:border-gray-600 my-4">
-        <form id="add-list-from-modal-form">
-            <label for="add-list-name" class="block text-gray-500 dark:text-gray-400 mb-2">Hoặc tạo kệ sách mới</label>
-            <div class="flex gap-2">
-                <input type="text" id="add-list-name" name="name" class="flex-grow bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-theme-500" placeholder="Tên kệ sách mới" required>
-                <button type="submit" class="px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Tạo</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<script>
-function toggleFavorite(bookId) {
-    fetch(`/toggle_favorite/${bookId}`, { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                const favoriteIcon = document.getElementById('favorite-icon');
-                const favoriteText = document.getElementById('favorite-text');
-                if (data.status === 'added') {
-                    favoriteText.innerText = 'Bỏ thích';
-                    favoriteIcon.classList.remove('far');
-                    favoriteIcon.classList.add('fas', 'text-red-500');
-                } else {
-                    favoriteText.innerText = 'Yêu thích';
-                    favoriteIcon.classList.remove('fas', 'text-red-500');
-                    favoriteIcon.classList.add('far');
-                }
-            } else {
-                alert('Đã có lỗi xảy ra: ' + data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Fetch Error:', error);
-            alert('Lỗi kết nối. Vui lòng thử lại.');
-        });
-}
-
-function toggleBookmark(bookId) {
-    fetch(`/toggle_bookmark/${bookId}`, { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                const bookmarkIcon = document.getElementById('bookmark-icon');
-                const bookmarkText = document.getElementById('bookmark-text');
-                if (data.status === 'added') {
-                    bookmarkText.innerText = 'Bỏ đánh dấu';
-                    bookmarkIcon.classList.remove('far');
-                    bookmarkIcon.classList.add('fas', 'text-theme-500');
-                } else {
-                    bookmarkText.innerText = 'Đánh dấu';
-                    bookmarkIcon.classList.remove('fas', 'text-theme-500');
-                    bookmarkIcon.classList.add('far');
-                }
-            } else {
-                alert('Đã có lỗi xảy ra: ' + data.message);
-            }
-        })
-        .catch(error => {
-            console.error('Fetch Error:', error);
-            alert('Lỗi kết nối. Vui lòng thử lại.');
-        });
-}
-
-function rateBook(bookId, rating) {
-    fetch(`/rate_book/${bookId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating: rating }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const stars = document.querySelectorAll('#rating-stars .fa-star');
-            stars.forEach(star => {
-                const starRating = parseInt(star.dataset.rating, 10);
-                if (starRating <= rating) {
-                    star.classList.remove('text-gray-400', 'dark:text-gray-600');
-                    star.classList.add('text-yellow-400');
-                } else {
-                    star.classList.remove('text-yellow-400');
-                    star.classList.add('text-gray-400', 'dark:text-gray-600');
-                }
-            });
-        } else {
-            alert('Đã có lỗi xảy ra: ' + data.message);
-        }
-    });
-}
-
-let currentBookIdForLists = null;
-
-function openListManagerModal(bookId) {
-    currentBookIdForLists = bookId;
-    const modal = document.getElementById('list-manager-modal');
-    const contentDiv = document.getElementById('list-manager-content');
-    contentDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-400">Đang tải...</p>';
-    modal.classList.remove('hidden');
-
-    fetch(`/api/book/${bookId}/lists`)
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                contentDiv.innerHTML = '';
-                if (data.lists.length === 0) {
-                     contentDiv.innerHTML = '<p class="text-gray-500 dark:text-gray-400">Bạn chưa có kệ sách nào.</p>';
-                }
-                data.lists.forEach(list => {
-                    const isChecked = list.has_book ? 'checked' : '';
-                    const label = document.createElement('label');
-                    label.className = 'flex items-center p-2 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600';
-                    label.innerHTML = `
-                        <input type="checkbox" onchange="toggleBookInList(${bookId}, ${list.id}, this.checked)" ${isChecked} class="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-theme-600 focus:ring-theme-500">
-                        <span class="ml-3 text-gray-800 dark:text-gray-300">${list.name}</span>
-                    `;
-                    contentDiv.appendChild(label);
-                });
-            } else {
-                contentDiv.innerHTML = '<p class="text-red-500">Lỗi tải danh sách.</p>';
-            }
-        });
-}
-
-function toggleBookInList(bookId, listId, shouldAdd) {
-    fetch('/api/lists/toggle_book', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ book_id: bookId, list_id: listId, action: shouldAdd ? 'add' : 'remove' }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (!data.success) {
-            alert('Lỗi: ' + data.message);
-            openListManagerModal(bookId); 
-        }
-    });
-}
-
-document.getElementById('add-list-from-modal-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    const listNameInput = document.getElementById('add-list-name');
-    const listName = listNameInput.value;
-    if (!listName) return;
-
-    fetch('{{ url_for("create_list") }}', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: listName }),
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            listNameInput.value = '';
-            openListManagerModal(currentBookIdForLists);
-        } else {
-            alert('Lỗi: ' + data.message);
-        }
-    });
-});
-</script>
 """
 
 LOGIN_TEMPLATE = """
@@ -1046,7 +923,12 @@ LOGIN_TEMPLATE = """
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
-                        <div class="bg-{{ 'green' if category=='success' else 'red' }}-600 text-white p-4 rounded-lg mb-4">{{ message }}</div>
+                        <div class="p-4 rounded-lg mb-4 text-white
+                        {% if category == 'danger' %} bg-red-600
+                        {% elif category == 'success' %} bg-green-600
+                        {% else %} bg-blue-600 {% endif %}">
+                        {{ message }}
+                        </div>
                     {% endfor %}
                 {% endif %}
             {% endwith %}
@@ -1084,7 +966,12 @@ REGISTER_TEMPLATE = """
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
-                        <div class="bg-red-600 text-white p-4 rounded-lg mb-4">{{ message }}</div>
+                        <div class="p-4 rounded-lg mb-4 text-white
+                        {% if category == 'danger' %} bg-red-600
+                        {% elif category == 'success' %} bg-green-600
+                        {% else %} bg-blue-600 {% endif %}">
+                        {{ message }}
+                        </div>
                     {% endfor %}
                 {% endif %}
             {% endwith %}
@@ -1128,17 +1015,61 @@ CHANGE_PASSWORD_TEMPLATE = """
 USER_MANAGEMENT_TEMPLATE = """
 <div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 md:p-6 mx-auto">
     <h2 class="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Quản lý người dùng</h2>
+
+    <!-- Tai khoan cho phep duyet -->
+    {% if pending_users %}
+    <div class="mb-10">
+        <h3 class="text-xl font-semibold mb-4 text-yellow-500 dark:text-yellow-400">Tài khoản chờ phê duyệt ({{ pending_users|length }})</h3>
+        <div class="overflow-x-auto">
+            <table class="min-w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="py-3 px-4 text-left">Tên người dùng</th>
+                        <th class="py-3 px-4 text-left">Mật khẩu</th>
+                        <th class="py-3 px-4 text-center">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                    {% for user in pending_users %}
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td class="py-3 px-4">{{ user.username }}</td>
+                        <td class="py-3 px-4 font-mono">{{ user.password }}</td>
+                        <td class="py-3 px-4 text-center">
+                            <div class="flex flex-col sm:flex-row gap-2 justify-center">
+                                <form method="POST" action="{{ url_for('approve_user', user_id=user.id) }}" class="inline-block">
+                                    <button type="submit" class="w-full text-sm px-3 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors">
+                                        <i class="fas fa-check mr-1"></i> Phê duyệt
+                                    </button>
+                                </form>
+                                <form method="POST" action="{{ url_for('delete_user', user_id=user.id) }}" class="inline-block" onsubmit="return confirm('Bạn có chắc chắn muốn XÓA YÊU CẦU của người dùng này?');">
+                                    <button type="submit" class="w-full text-sm px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors">
+                                        <i class="fas fa-times mr-1"></i> Từ chối
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Tai khoan da kich hoat -->
+    <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">Tài khoản đã kích hoạt ({{ active_users|length }})</h3>
     <div class="overflow-x-auto">
         <table class="min-w-full bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
             <thead class="bg-gray-50 dark:bg-gray-700">
                 <tr>
                     <th class="py-3 px-4 text-left">Tên người dùng</th>
+                    <th class="py-3 px-4 text-left">Mật khẩu <i class="fas fa-exclamation-triangle text-yellow-500" title="Hiển thị mật khẩu là một rủi ro bảo mật."></i></th>
                     <th class="py-3 px-4 text-left hidden sm:table-cell">Số sách</th>
                     <th class="py-3 px-4 text-center">Hành động</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                {% for user in users %}
+                {% for user in active_users %}
                 <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                     <td class="py-3 px-4">
                         {{ user.username }}
@@ -1146,6 +1077,7 @@ USER_MANAGEMENT_TEMPLATE = """
                             <span class="ml-2 px-2 py-1 bg-green-600 text-white text-xs rounded-full">Admin</span>
                         {% endif %}
                     </td>
+                    <td class="py-3 px-4 font-mono">{{ user.password }}</td>
                     <td class="py-3 px-4 hidden sm:table-cell">{{ user.books|length }}</td>
                     <td class="py-3 px-4 text-center">
                         {% if user.id != session.get('user_id') and user.username not in [GUEST_USERNAME, ADMIN_USERNAME] %}
@@ -1664,13 +1596,13 @@ EPUB_READER_TEMPLATE = """
 """
 
 SETTINGS_TEMPLATE = """
-<div x-data="settingsManager()" class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 max-w-3xl mx-auto">
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 max-w-3xl mx-auto">
     <h2 class="text-2xl font-bold mb-6 text-gray-900 dark:text-white">Cài đặt Hệ thống</h2>
-    <form @submit.prevent="saveSettings">
+    <form id="settings-form" method="POST" action="{{ url_for('settings') }}">
         <!-- Tên Thư viện -->
         <div class="mb-6">
             <label for="library_name" class="block text-gray-600 dark:text-gray-400 font-bold mb-2">Tên Thư viện</label>
-            <input name="library_name" id="library_name" x-model="libraryName" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
+            <input name="library_name" id="library_name" value="{{ app_config.library_name }}" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
             <p class="text-gray-500 text-sm mt-2">Tên sẽ hiển thị ở đầu trang.</p>
         </div>
 
@@ -1678,8 +1610,8 @@ SETTINGS_TEMPLATE = """
         <div class="mb-6">
             <label for="data_path" class="block text-gray-600 dark:text-gray-400 font-bold mb-2">Đường dẫn Thư mục Dữ liệu</label>
             <div class="flex">
-                <input name="data_path" id="data_path" x-model="dataPath" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-l-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
-                <button @click.prevent="openBrowser" type="button" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-r-lg">
+                <input name="data_path" id="data_path" value="{{ app_config.data_path }}" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-l-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
+                <button onclick="toggleModal('file-browser-modal', true); fetchDirectories('{{ safe_root }}');" type="button" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-r-lg">
                     <i class="fas fa-folder-open"></i>
                 </button>
             </div>
@@ -1690,153 +1622,176 @@ SETTINGS_TEMPLATE = """
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
                 <label for="theme" class="block text-gray-600 dark:text-gray-400 font-bold mb-2">Giao diện</label>
-                <select name="theme" id="theme" x-model="theme" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
-                    <option value="dark">Tối</option>
-                    <option value="light">Sáng</option>
+                <select name="theme" id="theme" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
+                    <option value="dark" {% if app_config.theme == 'dark' %}selected{% endif %}>Tối</option>
+                    <option value="light" {% if app_config.theme == 'light' %}selected{% endif %}>Sáng</option>
                 </select>
             </div>
             <div>
                 <label for="theme_color" class="block text-gray-600 dark:text-gray-400 font-bold mb-2">Màu chủ đề</label>
-                <select name="theme_color" id="theme_color" x-model="themeColor" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
-                    <option value="cyan">Cyan</option>
-                    <option value="blue">Blue</option>
-                    <option value="emerald">Emerald</option>
-                    <option value="rose">Rose</option>
-                    <option value="indigo">Indigo</option>
-                    <option value="violet">Violet</option>
-                    <option value="fuchsia">Fuchsia</option>
-                    <option value="orange">Orange</option>
+                <select name="theme_color" id="theme_color" class="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg border border-gray-300 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-theme-500">
+                    <option value="cyan" {% if app_config.theme_color == 'cyan' %}selected{% endif %}>Cyan</option>
+                    <option value="blue" {% if app_config.theme_color == 'blue' %}selected{% endif %}>Blue</option>
+                    <option value="emerald" {% if app_config.theme_color == 'emerald' %}selected{% endif %}>Emerald</option>
+                    <option value="rose" {% if app_config.theme_color == 'rose' %}selected{% endif %}>Rose</option>
+                    <option value="indigo" {% if app_config.theme_color == 'indigo' %}selected{% endif %}>Indigo</option>
+                    <option value="violet" {% if app_config.theme_color == 'violet' %}selected{% endif %}>Violet</option>
+                    <option value="fuchsia" {% if app_config.theme_color == 'fuchsia' %}selected{% endif %}>Fuchsia</option>
+                    <option value="orange" {% if app_config.theme_color == 'orange' %}selected{% endif %}>Orange</option>
                 </select>
             </div>
         </div>
 
-        <button type="submit" class="w-full px-4 py-3 bg-theme-600 text-white font-bold rounded-lg hover:bg-theme-700 transition-colors">
+        <button type="submit" onclick="saveSettingsAndSubmit()" class="w-full px-4 py-3 bg-theme-600 text-white font-bold rounded-lg hover:bg-theme-700 transition-colors">
             <i class="fas fa-save mr-2"></i> Lưu Cài đặt
         </button>
     </form>
 
     <!-- Modal Trinh duyet File -->
-    <div x-show="isBrowserOpen" @click.away="isBrowserOpen = false" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" x-cloak>
+    <div id="file-browser-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4 hidden">
         <div class="bg-gray-800 rounded-lg p-4 max-w-2xl w-full h-3/4 flex flex-col">
-            <h3 class="text-xl font-bold text-white mb-2" x-text="currentPath"></h3>
-            <div class="flex-grow bg-gray-900 rounded-lg p-2 overflow-y-auto">
-                <ul>
-                    <!-- Nut Len thu muc cha -->
-                    <li x-show="currentPath !== '{{ safe_root }}'">
-                        <a href="#" @click.prevent="browse('..')" class="flex items-center p-2 text-gray-300 hover:bg-gray-700 rounded-md">
-                            <i class="fas fa-arrow-up w-6 mr-2 text-yellow-400"></i> .. (Thư mục cha)
-                        </a>
-                    </li>
-                    <!-- Danh sach thu muc -->
-                    <template x-for="dir in directories" :key="dir">
-                        <li>
-                            <a href="#" @click.prevent="browse(dir)" class="flex items-center p-2 text-gray-300 hover:bg-gray-700 rounded-md">
-                                <i class="fas fa-folder w-6 mr-2 text-cyan-400"></i>
-                                <span x-text="dir"></span>
-                            </a>
-                        </li>
-                    </template>
-                </ul>
+            <h3 id="current-path-display" class="text-xl font-bold text-white mb-2"></h3>
+            <div id="directory-list" class="flex-grow bg-gray-900 rounded-lg p-2 overflow-y-auto">
+                <!-- Content will be injected by JS -->
             </div>
             <div class="flex justify-end space-x-4 mt-4">
-                <button @click="isBrowserOpen = false" type="button" class="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500">Hủy</button>
-                <button @click="selectPath" type="button" class="px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Chọn Thư mục này</button>
+                <button onclick="toggleModal('file-browser-modal', false)" type="button" class="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500">Hủy</button>
+                <button onclick="selectPath()" type="button" class="px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Chọn Thư mục này</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-function settingsManager() {
-    return {
-        isBrowserOpen: false,
-        libraryName: '{{ app_config.library_name }}',
-        dataPath: '{{ app_config.data_path }}',
-        currentPath: '{{ safe_root }}',
-        directories: [],
-        theme: localStorage.getItem('kavita_theme') || '{{ app_config.theme }}',
-        themeColor: localStorage.getItem('kavita_theme_color') || '{{ app_config.theme_color }}',
+let currentPath = '{{ safe_root }}';
 
-        openBrowser() {
-            this.isBrowserOpen = true;
-            this.fetchDirectories(this.currentPath);
-        },
-        fetchDirectories(path) {
-            fetch(`/api/browse?path=${encodeURIComponent(path)}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        this.currentPath = data.path;
-                        this.directories = data.directories.sort();
-                    } else {
-                        alert('Lỗi: ' + data.error);
-                    }
-                });
-        },
-        browse(dir) {
-            let newPath = this.currentPath;
-            if (dir === '..') {
-                newPath = newPath.substring(0, newPath.lastIndexOf('/')) || '/';
-                 if (newPath.length > 1 && newPath.endsWith('/')) {
-                    newPath = newPath.slice(0, -1);
+function fetchDirectories(path) {
+    const dirList = document.getElementById('directory-list');
+    dirList.innerHTML = '<p class="text-gray-400">Đang tải...</p>';
+    document.getElementById('current-path-display').textContent = path;
+
+    fetch(`/api/browse?path=${encodeURIComponent(path)}`)
+        .then(res => res.json())
+        .then(data => {
+            dirList.innerHTML = '';
+            if (data.success) {
+                currentPath = data.path;
+                document.getElementById('current-path-display').textContent = currentPath;
+                
+                // Nut Len thu muc cha
+                if (currentPath !== '{{ safe_root }}' && currentPath !== '/') {
+                     const upLink = document.createElement('a');
+                     upLink.href = '#';
+                     upLink.className = 'flex items-center p-2 text-gray-300 hover:bg-gray-700 rounded-md';
+                     upLink.innerHTML = `<i class="fas fa-arrow-up w-6 mr-2 text-yellow-400"></i> .. (Thư mục cha)`;
+                     upLink.onclick = (e) => { e.preventDefault(); browse('..'); };
+                     dirList.appendChild(upLink);
                 }
+
+                // Danh sach thu muc
+                data.directories.sort().forEach(dir => {
+                    const dirLink = document.createElement('a');
+                    dirLink.href = '#';
+                    dirLink.className = 'flex items-center p-2 text-gray-300 hover:bg-gray-700 rounded-md';
+                    dirLink.innerHTML = `<i class="fas fa-folder w-6 mr-2 text-cyan-400"></i> ${dir}`;
+                    dirLink.onclick = (e) => { e.preventDefault(); browse(dir); };
+                    dirList.appendChild(dirLink);
+                });
             } else {
-                newPath = this.currentPath === '/' ? `/${dir}` : `${this.currentPath}/${dir}`;
+                alert('Lỗi: ' + data.error);
+                dirList.innerHTML = `<p class="text-red-400">Lỗi: ${data.error}</p>`;
             }
-            this.fetchDirectories(newPath);
-        },
-        selectPath() {
-            this.dataPath = this.currentPath;
-            this.isBrowserOpen = false;
-        },
-        saveSettings() {
-            // Update localStorage immediately for instant UI feedback
-            const oldTheme = localStorage.getItem('kavita_theme');
-            const oldColor = localStorage.getItem('kavita_theme_color');
+        });
+}
 
-            localStorage.setItem('kavita_theme', this.theme);
-            localStorage.setItem('kavita_theme_color', this.themeColor);
-
-            // Create a form dynamically to POST data
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '{{ url_for("settings") }}';
-
-            const nameInput = document.createElement('input');
-            nameInput.type = 'hidden';
-            nameInput.name = 'library_name';
-            nameInput.value = this.libraryName;
-            form.appendChild(nameInput);
-
-            const dataPathInput = document.createElement('input');
-            dataPathInput.type = 'hidden';
-            dataPathInput.name = 'data_path';
-            dataPathInput.value = this.dataPath;
-            form.appendChild(dataPathInput);
-
-            const themeInput = document.createElement('input');
-            themeInput.type = 'hidden';
-            themeInput.name = 'theme';
-            themeInput.value = this.theme;
-            form.appendChild(themeInput);
-
-            const colorInput = document.createElement('input');
-            colorInput.type = 'hidden';
-            colorInput.name = 'theme_color';
-            colorInput.value = this.themeColor;
-            form.appendChild(colorInput);
-
-            document.body.appendChild(form);
-            form.submit();
-            
-            // Reload if theme settings changed
-            if (oldTheme !== this.theme || oldColor !== this.themeColor) {
-                 // The form submission will cause a page reload anyway
-            }
+function browse(dir) {
+    let newPath = currentPath;
+    if (dir === '..') {
+        newPath = newPath.substring(0, newPath.lastIndexOf('/')) || '/';
+        if (newPath.length > 1 && newPath.endsWith('/')) {
+            newPath = newPath.slice(0, -1);
         }
+    } else {
+        newPath = currentPath === '/' ? `/${dir}` : `${currentPath}/${dir}`;
     }
+    fetchDirectories(newPath);
+}
+
+function selectPath() {
+    document.getElementById('data_path').value = currentPath;
+    toggleModal('file-browser-modal', false);
+}
+
+function saveSettingsAndSubmit() {
+    // Update localStorage immediately for instant UI feedback on theme
+    const themeSelect = document.getElementById('theme');
+    const colorSelect = document.getElementById('theme_color');
+    localStorage.setItem('kavita_theme', themeSelect.value);
+    localStorage.setItem('kavita_theme_color', colorSelect.value);
+    
+    // Submit the form
+    document.getElementById('settings-form').submit();
 }
 </script>
+"""
+
+# Mau moi cho trang quan ly ke sach (thay the modal)
+LIST_MANAGER_PAGE_TEMPLATE = """
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 max-w-lg mx-auto">
+    <h2 class="text-2xl font-bold mb-2 text-gray-900 dark:text-white">Quản lý kệ sách cho:</h2>
+    <p class="text-lg text-gray-500 dark:text-gray-400 mb-6 truncate">{{ book.title }}</p>
+    
+    <form method="POST" action="{{ url_for('list_manager_page', book_id=book.id) }}">
+        <div class="space-y-3 max-h-80 overflow-y-auto mb-6 pr-2">
+            {% for list in all_user_lists %}
+            <label class="flex items-center p-3 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <input type="checkbox" name="list_ids" value="{{ list.id }}" class="h-5 w-5 rounded bg-gray-300 dark:bg-gray-900 border-gray-400 dark:border-gray-600 text-theme-600 focus:ring-theme-500" {% if list.id in book_list_ids %}checked{% endif %}>
+                <span class="ml-4 text-gray-800 dark:text-gray-300">{{ list.name }}</span>
+            </label>
+            {% else %}
+            <p class="text-gray-500 dark:text-gray-400">Bạn chưa có kệ sách nào. Hãy tạo một kệ mới bên dưới.</p>
+            {% endfor %}
+        </div>
+        <div class="flex flex-col sm:flex-row gap-4">
+            <a href="{{ url_for('book_detail', book_id=book.id) }}" class="w-full sm:w-auto text-center px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Hủy</a>
+            <button type="submit" class="w-full sm:flex-1 px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Lưu thay đổi</button>
+        </div>
+    </form>
+    
+    <hr class="border-gray-200 dark:border-gray-600 my-6">
+
+    <form method="POST" action="{{ url_for('create_list_and_add_book', book_id=book.id) }}">
+        <label for="new_list_name" class="block text-gray-600 dark:text-gray-400 font-bold mb-2">Hoặc tạo kệ mới và thêm sách này vào</label>
+        <div class="flex gap-2">
+            <input type="text" id="new_list_name" name="name" class="flex-grow bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-theme-500" placeholder="Tên kệ sách mới" required>
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Tạo & Thêm</button>
+        </div>
+    </form>
+</div>
+"""
+
+# Mau moi cho trang chuyen doi (thay the modal)
+CONVERT_PAGE_TEMPLATE = """
+<div class="bg-white dark:bg-gray-800 rounded-xl shadow-md p-8 max-w-md mx-auto">
+    <h2 class="text-2xl font-bold mb-2 text-gray-900 dark:text-white">Chuyển đổi sách</h2>
+    <p class="text-lg text-gray-500 dark:text-gray-400 mb-6 truncate">{{ book.title }}</p>
+    
+    <p class="text-gray-600 dark:text-gray-300 mb-4">Chọn định dạng bạn muốn chuyển đổi sang. Quá trình này có thể mất một lúc.</p>
+    
+    <form action="{{ url_for('convert_book', book_id=book.id) }}" method="POST">
+        <select name="target_format" class="w-full bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg p-3 mb-6 focus:outline-none focus:ring-2 focus:ring-theme-500">
+            {% for fmt in ['epub', 'mobi', 'pdf', 'azw3'] %}
+                {% if fmt != book.format %}
+                    <option value="{{ fmt }}">{{ fmt.upper() }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+        <div class="flex flex-col sm:flex-row gap-4">
+            <a href="{{ url_for('book_detail', book_id=book.id) }}" class="w-full sm:w-auto text-center px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">Hủy</a>
+            <button type="submit" class="w-full sm:flex-1 px-4 py-2 bg-theme-600 text-white rounded-lg hover:bg-theme-700">Bắt đầu chuyển đổi</button>
+        </div>
+    </form>
+</div>
 """
 
 
@@ -1847,6 +1802,7 @@ function settingsManager() {
 def index():
     page = request.args.get('page', 1, type=int)
     query_str = request.args.get('q', '').strip()
+    sort_option = request.args.get('sort', 'title_asc')
     user_id = session.get('user_id')
     is_admin = session.get('is_admin')
 
@@ -1873,15 +1829,24 @@ def index():
                 and_(Book.series != None, db.func.unaccent(Book.series).like(search_term))
             )
         )
-        relevance = case(
-            (db.func.unaccent(Book.title).like(unaccented_query), 1),
-            (db.func.unaccent(Book.title).like(f"{unaccented_query}%"), 2),
-            (and_(Book.author != None, db.func.unaccent(Book.author).like(unaccented_query)), 3),
-            else_=10
-        ).label("relevance")
-        pagination = books_query.order_by(relevance, Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
-    else:
-        pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+    
+    # Logic sap xep
+    if sort_option == 'title_asc':
+        books_query = books_query.order_by(Book.title.asc())
+    elif sort_option == 'title_desc':
+        books_query = books_query.order_by(Book.title.desc())
+    elif sort_option == 'author_asc':
+        books_query = books_query.order_by(Book.author.asc(), Book.title.asc())
+    elif sort_option == 'author_desc':
+        books_query = books_query.order_by(Book.author.desc(), Book.title.asc())
+    elif sort_option == 'rating_desc':
+        books_query = books_query.order_by(Book.rating.desc(), Book.title.asc())
+    elif sort_option == 'date_desc':
+        books_query = books_query.order_by(Book.date_added.desc())
+    else: # Mac dinh
+        books_query = books_query.order_by(Book.title.asc())
+
+    pagination = books_query.paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
     
     bookmarked_set = set()
     favorited_set = set()
@@ -1904,7 +1869,7 @@ def index():
         book.is_bookmarked = (book.title, book.author) in bookmarked_set
         book.is_favorited = (book.title, book.author) in favorited_set
 
-    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query=query_str, page_title="Thư viện", random_books=random_books, is_admin=is_admin)
+    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query=query_str, sort=sort_option, page_title="Thư viện", random_books=random_books, is_admin=is_admin)
     return render_template_string(LAYOUT_TEMPLATE, content=index_content, query=query_str)
 
 @app.route('/library/<int:user_id>')
@@ -1917,6 +1882,7 @@ def view_user_library(user_id):
     user = User.query.get_or_404(user_id)
     page = request.args.get('page', 1, type=int)
     query_str = request.args.get('q', '').strip()
+    sort_option = request.args.get('sort', 'title_asc')
 
     base_books_query = Book.query.filter_by(user_id=user_id)
     subquery = base_books_query.with_entities(db.func.min(Book.id).label("min_id")).group_by(Book.title, Book.author).subquery()
@@ -1931,12 +1897,19 @@ def view_user_library(user_id):
                 and_(Book.author != None, db.func.unaccent(Book.author).like(search_term))
             )
         )
-        pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+    
+    # Logic sap xep
+    if sort_option == 'title_desc':
+        books_query = books_query.order_by(Book.title.desc())
+    elif sort_option == 'rating_desc':
+        books_query = books_query.order_by(Book.rating.desc(), Book.title.asc())
     else:
-        pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+        books_query = books_query.order_by(Book.title.asc())
+
+    pagination = books_query.paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
     
     page_title = f"Thư viện của: {user.username}"
-    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query=query_str, page_title=page_title, is_admin=False, random_books=None)
+    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query=query_str, sort=sort_option, page_title=page_title, is_admin=False, random_books=None)
     return render_template_string(LAYOUT_TEMPLATE, content=index_content, query=query_str)
 
 @app.route('/favorites')
@@ -1944,6 +1917,7 @@ def view_user_library(user_id):
 def favorites():
     user_id = session.get('user_id')
     page = request.args.get('page', 1, type=int)
+    sort_option = request.args.get('sort', 'title_asc')
     
     if session.get('username') == GUEST_USERNAME:
         permissions = GuestPermission.query.first()
@@ -1958,13 +1932,17 @@ def favorites():
         .group_by(Book.title, Book.author).subquery()
 
     books_query = Book.query.join(subquery, Book.id == subquery.c.min_id)
-    pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+    
+    if sort_option == 'title_desc': books_query = books_query.order_by(Book.title.desc())
+    else: books_query = books_query.order_by(Book.title.asc())
+
+    pagination = books_query.paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
 
     for book in pagination.items:
         book.is_favorited = True
         book.is_bookmarked = BookMark.query.filter_by(user_id=user_id, book_id=book.id).first() is not None
 
-    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', page_title="Sách Yêu Thích", is_admin=session.get('is_admin'))
+    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', sort=sort_option, page_title="Sách Yêu Thích", is_admin=session.get('is_admin'))
     return render_template_string(LAYOUT_TEMPLATE, content=index_content, query='')
 
 
@@ -1973,6 +1951,7 @@ def favorites():
 def bookmarks():
     user_id = session.get('user_id')
     page = request.args.get('page', 1, type=int)
+    sort_option = request.args.get('sort', 'title_asc')
     
     if session.get('username') == GUEST_USERNAME:
         permissions = GuestPermission.query.first()
@@ -1987,14 +1966,18 @@ def bookmarks():
         .group_by(Book.title, Book.author).subquery()
 
     books_query = Book.query.join(subquery, Book.id == subquery.c.min_id)
-    pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+    
+    if sort_option == 'title_desc': books_query = books_query.order_by(Book.title.desc())
+    else: books_query = books_query.order_by(Book.title.asc())
+        
+    pagination = books_query.paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
 
     for book in pagination.items:
         book.is_bookmarked = True
         book.is_favorited = Favorite.query.filter_by(user_id=user_id, book_id=book.id).first() is not None
 
 
-    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', page_title="Sách Đã Đánh Dấu", is_admin=session.get('is_admin'))
+    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', sort=sort_option, page_title="Sách Đã Đánh Dấu", is_admin=session.get('is_admin'))
     return render_template_string(LAYOUT_TEMPLATE, content=index_content, query='')
 
 @app.route('/lists/create', methods=['POST'])
@@ -2020,12 +2003,17 @@ def create_list():
 @login_required
 def view_list(list_id):
     page = request.args.get('page', 1, type=int)
+    sort_option = request.args.get('sort', 'title_asc')
     user_id = session.get('user_id')
     book_list = BookList.query.filter_by(id=list_id, user_id=user_id).first_or_404()
 
     unique_books_in_list_subquery = book_list.books.with_entities(func.min(Book.id).label('min_id')).group_by(Book.title, Book.author).subquery()
     books_query = Book.query.join(unique_books_in_list_subquery, Book.id == unique_books_in_list_subquery.c.min_id)
-    pagination = books_query.order_by(Book.title).paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
+    
+    if sort_option == 'title_desc': books_query = books_query.order_by(Book.title.desc())
+    else: books_query = books_query.order_by(Book.title.asc())
+
+    pagination = books_query.paginate(page=page, per_page=BOOKS_PER_PAGE, error_out=False)
     
     bookmarked_set = set()
     favorited_set = set()
@@ -2041,57 +2029,8 @@ def view_list(list_id):
         book.is_bookmarked = (book.title, book.author) in bookmarked_set
         book.is_favorited = (book.title, book.author) in favorited_set
 
-    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', page_title=f"Kệ sách: {book_list.name}", is_admin=session.get('is_admin'))
+    index_content = render_template_string(INDEX_TEMPLATE, pagination=pagination, query='', sort=sort_option, page_title=f"Kệ sách: {book_list.name}", is_admin=session.get('is_admin'))
     return render_template_string(LAYOUT_TEMPLATE, content=index_content, query='')
-
-@app.route('/api/book/<int:book_id>/lists', methods=['GET'])
-@login_required
-def get_book_lists(book_id):
-    book_rep = check_book_permission(book_id)
-    if not book_rep:
-        return jsonify(success=False, message="Không có quyền truy cập.")
-
-    user_id = session.get('user_id')
-    all_user_lists = BookList.query.filter_by(user_id=user_id).order_by(BookList.name).all()
-    all_formats = Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=book_rep.user_id).all()
-    all_format_ids = {b.id for b in all_formats}
-
-    result = []
-    for lst in all_user_lists:
-        count = db.session.query(book_list_association).filter(
-            book_list_association.c.book_list_id == lst.id,
-            book_list_association.c.book_id.in_(all_format_ids)
-        ).count()
-        result.append({'id': lst.id, 'name': lst.name, 'has_book': count > 0})
-    
-    return jsonify(success=True, lists=result)
-
-@app.route('/api/lists/toggle_book', methods=['POST'])
-@login_required
-def toggle_book_in_list():
-    data = request.get_json()
-    book_id, list_id, action = data.get('book_id'), data.get('list_id'), data.get('action')
-    user_id = session.get('user_id')
-    book = check_book_permission(book_id)
-    if not book: return jsonify(success=False, message="Không có quyền truy cập sách này.")
-    book_list = BookList.query.filter_by(id=list_id, user_id=user_id).first()
-    if not book_list: return jsonify(success=False, message="Không tìm thấy kệ sách.")
-
-    all_formats = Book.query.filter_by(title=book.title, author=book.author, user_id=book.user_id).all()
-    
-    if action == 'add':
-        for b in all_formats:
-            if b not in book_list.books: book_list.books.append(b)
-        message = "Đã thêm sách vào kệ."
-    elif action == 'remove':
-        for b in all_formats:
-            if b in book_list.books: book_list.books.remove(b)
-        message = "Đã xóa sách khỏi kệ."
-    else:
-        return jsonify(success=False, message="Hành động không hợp lệ.")
-
-    db.session.commit()
-    return jsonify(success=True, message=message)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -2101,6 +2040,10 @@ def login():
         user = User.query.filter_by(username=username).first()
         
         if user and ((user.password == password) or (user.username == GUEST_USERNAME and not password)):
+            if not user.is_active:
+                flash('Tài khoản của bạn đang chờ quản trị viên phê duyệt.', 'warning')
+                return redirect(url_for('login'))
+
             session['logged_in'] = True
             session['is_admin'] = user.is_admin
             session['username'] = user.username
@@ -2124,10 +2067,10 @@ def register():
             flash('Tên đăng nhập đã tồn tại.', 'danger')
             return redirect(url_for('register'))
 
-        new_user = User(username=username, password=password, is_admin=False)
+        new_user = User(username=username, password=password, is_admin=False, is_active=False)
         db.session.add(new_user)
         db.session.commit()
-        flash('Đăng ký tài khoản thành công! Vui lòng đăng nhập.', 'success')
+        flash('Đăng ký thành công! Tài khoản của bạn cần được quản trị viên phê duyệt trước khi đăng nhập.', 'success')
         return redirect(url_for('login'))
 
     return render_template_string(REGISTER_TEMPLATE, app_config=load_config())
@@ -2343,7 +2286,7 @@ def read_online(book_id):
 
 @app.route('/save_settings/<int:book_id>', methods=['POST'])
 @login_required
-def save_settings(book_id):
+def save_reader_settings(book_id):
     book = check_book_permission(book_id)
     if not book: return jsonify(success=False, message="Không có quyền.")
     user_id = session.get('user_id')
@@ -2497,57 +2440,71 @@ def delete(book_id):
 def toggle_favorite(book_id):
     user_id = session.get('user_id')
     if session.get('username') == GUEST_USERNAME and not (GuestPermission.query.first() and GuestPermission.query.first().can_favorite):
-        return jsonify(success=False, message="Tài khoản khách không được phép.")
+        flash("Tài khoản khách không được phép.", 'danger')
+        return redirect(url_for('book_detail', book_id=book_id))
 
     book_rep = check_book_permission(book_id)
-    if not book_rep: return jsonify(success=False, message="Không có quyền.")
+    if not book_rep: 
+        flash("Không có quyền.", 'danger')
+        return redirect(url_for('index'))
 
     all_format_ids = [b.id for b in Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=book_rep.user_id).all()]
     favorite = Favorite.query.filter(Favorite.user_id == user_id, Favorite.book_id.in_(all_format_ids)).first()
 
     if not favorite:
         for bid in all_format_ids: db.session.add(Favorite(user_id=user_id, book_id=bid))
-        status = "added"
+        flash("Đã thêm vào danh sách yêu thích.", 'success')
     else:
         Favorite.query.filter(Favorite.user_id == user_id, Favorite.book_id.in_(all_format_ids)).delete()
-        status = "removed"
+        flash("Đã xóa khỏi danh sách yêu thích.", 'success')
     db.session.commit()
-    return jsonify(success=True, status=status)
+    return redirect(url_for('book_detail', book_id=book_id))
 
 @app.route('/toggle_bookmark/<int:book_id>', methods=['POST'])
 @login_required
 def toggle_bookmark(book_id):
     user_id = session.get('user_id')
     if session.get('username') == GUEST_USERNAME and not (GuestPermission.query.first() and GuestPermission.query.first().can_bookmark):
-        return jsonify(success=False, message="Tài khoản khách không được phép.")
+        flash("Tài khoản khách không được phép.", 'danger')
+        return redirect(url_for('book_detail', book_id=book_id))
 
     book_rep = check_book_permission(book_id)
-    if not book_rep: return jsonify(success=False, message="Không có quyền.")
+    if not book_rep: 
+        flash("Không có quyền.", 'danger')
+        return redirect(url_for('index'))
 
     all_format_ids = [b.id for b in Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=book_rep.user_id).all()]
     bookmark = BookMark.query.filter(BookMark.user_id == user_id, BookMark.book_id.in_(all_format_ids)).first()
 
     if not bookmark:
         for bid in all_format_ids: db.session.add(BookMark(user_id=user_id, book_id=bid))
-        status = "added"
+        flash("Đã đánh dấu sách.", 'success')
     else:
         BookMark.query.filter(BookMark.user_id == user_id, BookMark.book_id.in_(all_format_ids)).delete()
-        status = "removed"
+        flash("Đã bỏ đánh dấu sách.", 'success')
     db.session.commit()
-    return jsonify(success=True, status=status)
+    return redirect(url_for('book_detail', book_id=book_id))
 
 @app.route('/rate_book/<int:book_id>', methods=['POST'])
 @login_required
 def rate_book(book_id):
     book_rep = check_book_permission(book_id)
-    if not book_rep: return jsonify(success=False, message="Không có quyền.")
-    rating = request.get_json().get('rating')
+    if not book_rep: 
+        flash("Không có quyền.", 'danger')
+        return redirect(url_for('index'))
+        
+    rating = request.form.get('rating')
     if rating is not None:
-        books_to_rate = Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=book_rep.user_id).all()
-        for book in books_to_rate: book.rating = rating
-        db.session.commit()
-        return jsonify(success=True)
-    return jsonify(success=False)
+        try:
+            rating_val = int(rating)
+            books_to_rate = Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=book_rep.user_id).all()
+            for book in books_to_rate: 
+                book.rating = rating_val
+            db.session.commit()
+            flash(f"Đã đánh giá sách {rating_val} sao.", 'success')
+        except (ValueError, TypeError):
+            flash("Giá trị đánh giá không hợp lệ.", 'danger')
+    return redirect(url_for('book_detail', book_id=book_id))
 
 @app.route('/manage_users')
 @login_required
@@ -2555,9 +2512,25 @@ def manage_users():
     if not session.get('is_admin'):
         flash('Bạn không có quyền truy cập trang này.', 'danger')
         return redirect(url_for('index'))
-    users = User.query.all()
-    content = render_template_string(USER_MANAGEMENT_TEMPLATE, users=users)
+    
+    pending_users = User.query.filter_by(is_active=False).order_by(User.username).all()
+    active_users = User.query.filter_by(is_active=True).order_by(User.username).all()
+
+    content = render_template_string(USER_MANAGEMENT_TEMPLATE, pending_users=pending_users, active_users=active_users)
     return render_template_string(LAYOUT_TEMPLATE, content=content, query='')
+
+@app.route('/approve_user/<int:user_id>', methods=['POST'])
+@login_required
+def approve_user(user_id):
+    if not session.get('is_admin'):
+        flash('Hành động không được phép.', 'danger')
+        return redirect(url_for('manage_users'))
+    
+    user = User.query.get_or_404(user_id)
+    user.is_active = True
+    db.session.commit()
+    flash(f'Đã phê duyệt tài khoản cho {user.username}.', 'success')
+    return redirect(url_for('manage_users'))
 
 @app.route('/guest_permissions', methods=['GET', 'POST'])
 @login_required
@@ -2759,6 +2732,15 @@ def process_calibre_import():
 
     return redirect(url_for('index'))
 
+@app.route('/convert_page/<int:book_id>', methods=['GET'])
+@login_required
+def convert_page(book_id):
+    book = check_book_permission(book_id)
+    if not book:
+        flash('Bạn không có quyền thực hiện thao tác này.', 'danger')
+        return redirect(url_for('index'))
+    content = render_template_string(CONVERT_PAGE_TEMPLATE, book=book)
+    return render_template_string(LAYOUT_TEMPLATE, content=content, query='')
 
 @app.route('/convert/<int:book_id>', methods=['POST'])
 @login_required
@@ -2798,6 +2780,93 @@ def convert_book(book_id):
     
     return redirect(url_for('book_detail', book_id=book.id))
 
+@app.route('/list_manager/<int:book_id>', methods=['GET', 'POST'])
+@login_required
+def list_manager_page(book_id):
+    book_rep = check_book_permission(book_id)
+    if not book_rep:
+        flash("Không có quyền truy cập sách này.", 'danger')
+        return redirect(url_for('index'))
+
+    user_id = session.get('user_id')
+    
+    if request.method == 'POST':
+        selected_list_ids = request.form.getlist('list_ids')
+        
+        all_formats = Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=user_id).all()
+        all_format_ids = {b.id for b in all_formats}
+        all_user_lists = BookList.query.filter_by(user_id=user_id).all()
+
+        for book_list in all_user_lists:
+            # Check if this list was selected in the form
+            is_selected = str(book_list.id) in selected_list_ids
+            
+            # Get all books of the same title/author already in this list
+            current_books_in_list = {b.id for b in book_list.books if b.id in all_format_ids}
+            
+            if is_selected:
+                # Add all formats to the list if they aren't already there
+                for book_format in all_formats:
+                    if book_format.id not in current_books_in_list:
+                        book_list.books.append(book_format)
+            else:
+                # Remove all formats from the list
+                for book_format_id in current_books_in_list:
+                    book_to_remove = Book.query.get(book_format_id)
+                    if book_to_remove:
+                        book_list.books.remove(book_to_remove)
+                        
+        db.session.commit()
+        flash("Đã cập nhật kệ sách.", 'success')
+        return redirect(url_for('book_detail', book_id=book_id))
+
+    # GET request logic
+    all_user_lists = BookList.query.filter_by(user_id=user_id).order_by(BookList.name).all()
+    all_format_ids = {b.id for b in Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=user_id).all()}
+    
+    book_list_ids_with_book = {
+        row.book_list_id for row in db.session.query(book_list_association.c.book_list_id)
+        .filter(book_list_association.c.book_id.in_(all_format_ids))
+        .distinct()
+    }
+    
+    content = render_template_string(LIST_MANAGER_PAGE_TEMPLATE, book=book_rep, all_user_lists=all_user_lists, book_list_ids=book_list_ids_with_book)
+    return render_template_string(LAYOUT_TEMPLATE, content=content, query='')
+
+@app.route('/create_list_and_add/<int:book_id>', methods=['POST'])
+@login_required
+def create_list_and_add_book(book_id):
+    book_rep = check_book_permission(book_id)
+    if not book_rep:
+        flash("Không có quyền truy cập sách này.", 'danger')
+        return redirect(url_for('index'))
+        
+    list_name = request.form.get('name', '').strip()
+    user_id = session.get('user_id')
+
+    if not list_name:
+        flash("Tên kệ sách không được để trống.", 'danger')
+        return redirect(url_for('list_manager_page', book_id=book_id))
+
+    existing_list = BookList.query.filter_by(user_id=user_id, name=list_name).first()
+    if existing_list:
+        flash("Kệ sách với tên này đã tồn tại.", 'warning')
+        new_list = existing_list
+    else:
+        new_list = BookList(name=list_name, user_id=user_id)
+        db.session.add(new_list)
+        flash(f"Đã tạo kệ sách '{list_name}'.", 'success')
+
+    all_formats = Book.query.filter_by(title=book_rep.title, author=book_rep.author, user_id=user_id).all()
+    for book in all_formats:
+        if book not in new_list.books:
+            new_list.books.append(book)
+    
+    db.session.commit()
+    flash(f"Đã thêm sách vào kệ '{list_name}'.", 'success')
+    return redirect(url_for('list_manager_page', book_id=book_id))
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
@@ -2808,22 +2877,15 @@ def settings():
     current_config = load_config()
 
     if request.method == 'POST':
-        # Cap nhat ten thu vien
-        new_library_name = request.form.get('library_name', 'Thư Viện Sách').strip()
-        if not new_library_name:
-            new_library_name = 'Thư Viện Sách'
-
-        # Cap nhat duong dan
+        new_library_name = request.form.get('library_name', 'Thư Viện Sách').strip() or 'Thư Viện Sách'
         new_path = request.form.get('data_path', '').strip()
+        new_theme = request.form.get('theme')
+        new_theme_color = request.form.get('theme_color')
+
         if not new_path:
             flash('Đường dẫn dữ liệu không được để trống.', 'danger')
             return redirect(url_for('settings'))
         
-        # Cap nhat giao dien
-        new_theme = request.form.get('theme')
-        new_theme_color = request.form.get('theme_color')
-
-        # Luu cau hinh
         path_changed = os.path.abspath(new_path) != os.path.abspath(current_config['data_path'])
         
         current_config['library_name'] = new_library_name
@@ -2839,7 +2901,7 @@ def settings():
 
         return redirect(url_for('settings'))
 
-    content = render_template_string(SETTINGS_TEMPLATE, safe_root=SAFE_BROWSING_ROOT)
+    content = render_template_string(SETTINGS_TEMPLATE, safe_root=SAFE_BROWSING_ROOT.replace('\\', '/'))
     return render_template_string(LAYOUT_TEMPLATE, content=content, query='')
 
 @app.route('/api/browse')
@@ -2850,9 +2912,10 @@ def browse_fs():
 
     req_path = request.args.get('path', SAFE_BROWSING_ROOT)
     
-    # Bao mat: Chuan hoa duong dan va kiem tra xem no co nam trong thu muc an toan khong
-    abs_path = os.path.abspath(req_path)
-    if not abs_path.startswith(SAFE_BROWSING_ROOT):
+    abs_path = os.path.abspath(os.path.normpath(req_path))
+    safe_root_norm = os.path.abspath(os.path.normpath(SAFE_BROWSING_ROOT))
+
+    if not abs_path.startswith(safe_root_norm):
         return jsonify(success=False, error="Truy cập bị từ chối"), 403
 
     if not os.path.isdir(abs_path):
@@ -2860,12 +2923,11 @@ def browse_fs():
 
     try:
         dirs = [d for d in os.listdir(abs_path) if os.path.isdir(os.path.join(abs_path, d)) and not d.startswith('.')]
-        return jsonify(success=True, path=abs_path, directories=dirs)
+        return jsonify(success=True, path=abs_path.replace('\\', '/'), directories=dirs)
     except OSError as e:
         return jsonify(success=False, error=f"Không thể đọc thư mục: {e}"), 500
 
 if __name__ == '__main__':
-    # Doc cong tu file config khi khoi dong
     app_config = load_config()
     port = app_config.get('port', 5000)
     initialize_database()
